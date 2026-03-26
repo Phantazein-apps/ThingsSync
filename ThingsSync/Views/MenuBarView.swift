@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @ObservedObject var syncEngine: SyncEngine
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -76,7 +77,12 @@ struct MenuBarView: View {
             }
 
             // Footer
-            SettingsLink {
+            Button {
+                let engine = syncEngine
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    SettingsWindowController.shared.show(syncEngine: engine)
+                }
+            } label: {
                 Label("Settings…", systemImage: "gear")
             }
 
@@ -86,5 +92,40 @@ struct MenuBarView: View {
         }
         .padding(12)
         .frame(width: 280)
+    }
+}
+
+/// Manages the settings window using AppKit directly, since SwiftUI's
+/// openWindow/Settings scene doesn't work from MenuBarExtra.
+@MainActor
+final class SettingsWindowController {
+    static let shared = SettingsWindowController()
+    private var window: NSWindow?
+
+    func show(syncEngine: SyncEngine) {
+        if let existing = window, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let settingsView = SettingsView(syncEngine: syncEngine)
+        let hostingView = NSHostingView(rootView: settingsView)
+        hostingView.frame = NSRect(x: 0, y: 0, width: 500, height: 560)
+
+        let window = NSWindow(
+            contentRect: hostingView.frame,
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "ThingsSync Settings"
+        window.contentView = hostingView
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+
+        self.window = window
     }
 }

@@ -1,65 +1,53 @@
 import Foundation
-import Security
 
-/// Simple Keychain wrapper for storing credentials securely.
+/// Credential storage.
+/// During development: uses a JSON config file (~/.things3-notion-sync/credentials.json)
+/// For release builds: will use macOS Keychain (requires code signing).
 enum KeychainHelper {
-    private static let service = "com.phantazein.ThingsSync"
+
+    private static let credentialsURL: URL = {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".things3-notion-sync")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("credentials.json")
+    }()
 
     static func save(account: String, value: String) throws {
-        let data = Data(value.utf8)
-
-        // Delete existing item first
-        let deleteQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        SecItemDelete(deleteQuery as CFDictionary)
-
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: data,
-        ]
-
-        let status = SecItemAdd(addQuery as CFDictionary, nil)
-        guard status == errSecSuccess else {
-            throw KeychainError.saveFailed(status)
-        }
+        var creds = loadAll()
+        creds[account] = value
+        let data = try JSONSerialization.data(withJSONObject: creds, options: .prettyPrinted)
+        try data.write(to: credentialsURL, options: .atomic)
+        // Restrict to owner-only read/write
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: credentialsURL.path
+        )
     }
 
     static func load(account: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess, let data = result as? Data else {
-            return nil
-        }
-        return String(data: data, encoding: .utf8)
+        loadAll()[account]
     }
 
     static func delete(account: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        SecItemDelete(query as CFDictionary)
+        var creds = loadAll()
+        creds.removeValue(forKey: account)
+        if let data = try? JSONSerialization.data(withJSONObject: creds, options: .prettyPrinted) {
+            try? data.write(to: credentialsURL, options: .atomic)
+        }
+    }
+
+    private static func loadAll() -> [String: String] {
+        guard let data = try? Data(contentsOf: credentialsURL),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return [:]
+        }
+        return dict
     }
 
     enum KeychainError: Error, LocalizedError {
         case saveFailed(OSStatus)
         var errorDescription: String? {
-            "Keychain save failed with status \(self)"
+            "Credential save failed: \(self)"
         }
     }
 }

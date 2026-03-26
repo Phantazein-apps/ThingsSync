@@ -2,19 +2,27 @@ import AppKit
 import Foundation
 
 /// Reads Things 3 "Today" items via the AppleScript/JXA bridge.
+/// Writes via the `things:///` URL scheme (requires auth token).
 /// Uses `lists.byId("TMTodayListSource")` which is locale-independent.
 actor ThingsReader {
 
     enum ThingsError: Error, LocalizedError {
         case scriptFailed(String)
         case decodingFailed
+        case missingAuthToken
 
         var errorDescription: String? {
             switch self {
             case .scriptFailed(let msg): return "Things 3 script failed: \(msg)"
             case .decodingFailed: return "Failed to decode Things 3 response"
+            case .missingAuthToken: return "Things 3 URL auth token not set — go to Things → Settings → General"
             }
         }
+    }
+
+    /// Auth token from Things 3 → Settings → General → "Enable Things URLs"
+    private var authToken: String? {
+        KeychainHelper.load(account: "things-auth-token")
     }
 
     /// Fetches all to-dos from the Things 3 Today list.
@@ -77,9 +85,16 @@ actor ThingsReader {
     }
 
     /// Updates a Things 3 to-do via the `things:///update` URL scheme.
-    func updateItem(id: String, title: String? = nil, notes: String? = nil, completed: Bool = false) {
+    func updateItem(id: String, title: String? = nil, notes: String? = nil, completed: Bool = false) throws {
+        guard let token = authToken, !token.isEmpty else {
+            throw ThingsError.missingAuthToken
+        }
+
         var components = URLComponents(string: "things:///update")!
-        var queryItems = [URLQueryItem(name: "id", value: id)]
+        var queryItems = [
+            URLQueryItem(name: "auth-token", value: token),
+            URLQueryItem(name: "id", value: id),
+        ]
         if let title { queryItems.append(URLQueryItem(name: "title", value: title)) }
         if let notes { queryItems.append(URLQueryItem(name: "notes", value: notes)) }
         if completed { queryItems.append(URLQueryItem(name: "completed", value: "true")) }
@@ -91,9 +106,14 @@ actor ThingsReader {
     }
 
     /// Creates a new Things 3 to-do in Today via the `things:///add` URL scheme.
-    func createItem(title: String, notes: String = "") {
+    func createItem(title: String, notes: String = "") throws {
+        guard let token = authToken, !token.isEmpty else {
+            throw ThingsError.missingAuthToken
+        }
+
         var components = URLComponents(string: "things:///add")!
         components.queryItems = [
+            URLQueryItem(name: "auth-token", value: token),
             URLQueryItem(name: "title", value: title),
             URLQueryItem(name: "notes", value: notes),
             URLQueryItem(name: "when", value: "today"),

@@ -89,12 +89,21 @@ class SyncEngine: ObservableObject {
             // Step 2: Read Notion
             let notionPages = try await notionClient.queryDatabase()
 
+            // First run: just snapshot state, don't execute any actions
+            let isFirstRun = state.lastSync == nil
+
             // Step 3: Diff and resolve
-            let actions = DiffResolver.resolve(
-                thingsItems: thingsItems,
-                notionPages: notionPages,
-                previousState: state
-            )
+            let actions: [SyncAction]
+            if isFirstRun {
+                actions = []
+                log("First run — building initial state snapshot (no writes)")
+            } else {
+                actions = DiffResolver.resolve(
+                    thingsItems: thingsItems,
+                    notionPages: notionPages,
+                    previousState: state
+                )
+            }
 
             // Step 4: Execute actions
             for action in actions {
@@ -107,7 +116,9 @@ class SyncEngine: ObservableObject {
 
             lastSyncTime = Date()
 
-            if actions.isEmpty {
+            if isFirstRun {
+                log("State snapshot saved — \(thingsItems.count) Things items, \(notionPages.count) Notion pages")
+            } else if actions.isEmpty {
                 log("Sync complete — no changes")
             } else {
                 log("Synced \(actions.count) change(s)")
@@ -135,7 +146,7 @@ class SyncEngine: ObservableObject {
             log("→ Notion: Updated '\(item.name)'")
 
         case .updateThings(let thingsId, let page):
-            await thingsReader.updateItem(
+            try await thingsReader.updateItem(
                 id: thingsId,
                 title: page.title,
                 notes: page.notes,
@@ -144,7 +155,7 @@ class SyncEngine: ObservableObject {
             log("← Things: Updated '\(page.title)'")
 
         case .createInThings(let page):
-            await thingsReader.createItem(title: page.title, notes: page.notes)
+            try await thingsReader.createItem(title: page.title, notes: page.notes)
             log("← Things: Created '\(page.title)'")
 
         case .archiveNotion(let pageId, let title):

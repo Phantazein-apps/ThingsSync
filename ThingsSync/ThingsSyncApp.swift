@@ -5,13 +5,11 @@ struct ThingsSyncApp: App {
     @StateObject private var syncEngine = SyncEngine()
 
     init() {
-        // CLI test mode: run pipeline and exit
         if CommandLine.arguments.contains("--test") {
             Task {
                 await CLITest.run()
                 exit(0)
             }
-            // Give the async task time to run
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 30))
             exit(0)
         }
@@ -24,10 +22,6 @@ struct ThingsSyncApp: App {
             Image(systemName: menuBarIcon)
         }
         .menuBarExtraStyle(.window)
-
-        Settings {
-            SettingsView(syncEngine: syncEngine)
-        }
     }
 
     private var menuBarIcon: String {

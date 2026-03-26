@@ -4,10 +4,19 @@ struct SettingsView: View {
     @ObservedObject var syncEngine: SyncEngine
     @State private var apiKey = ""
     @State private var databaseId = ""
+    @State private var thingsAuthToken = ""
     @State private var saveError: String?
 
     var body: some View {
         Form {
+            Section("Things 3") {
+                SecureField("URL Auth Token", text: $thingsAuthToken)
+                    .textFieldStyle(.roundedBorder)
+                Text("Things → Settings → General → Enable Things URLs")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Notion Connection") {
                 SecureField("API Key", text: $apiKey)
                     .textFieldStyle(.roundedBorder)
@@ -89,6 +98,7 @@ struct SettingsView: View {
         .onAppear {
             apiKey = KeychainHelper.load(account: "notion-api-key") ?? ""
             databaseId = KeychainHelper.load(account: "notion-database-id") ?? ""
+            thingsAuthToken = KeychainHelper.load(account: "things-auth-token") ?? ""
         }
     }
 
@@ -108,6 +118,9 @@ struct SettingsView: View {
     private func saveAndConnect() {
         saveError = nil
         do {
+            if !thingsAuthToken.isEmpty {
+                try KeychainHelper.save(account: "things-auth-token", value: thingsAuthToken)
+            }
             try KeychainHelper.save(account: "notion-api-key", value: apiKey)
             try KeychainHelper.save(account: "notion-database-id", value: databaseId)
             syncEngine.start(apiKey: apiKey, databaseId: databaseId)
