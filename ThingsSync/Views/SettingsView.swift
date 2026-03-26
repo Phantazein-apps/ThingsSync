@@ -54,6 +54,11 @@ struct SettingsView: View {
                     Text("5 minutes").tag(TimeInterval(300))
                 }
 
+                Toggle("Launch at login", isOn: Binding(
+                    get: { syncEngine.launchAtLogin },
+                    set: { _ in syncEngine.toggleLaunchAtLogin() }
+                ))
+
                 LabeledContent("Status") {
                     Text(statusText)
                         .foregroundStyle(statusColor)

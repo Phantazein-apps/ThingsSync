@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AppKit
+import ServiceManagement
 
 /// Orchestrates bidirectional sync between Things 3 and Notion.
 /// Runs on a configurable timer. Replaces the bash script + LaunchAgent.
@@ -12,6 +13,7 @@ class SyncEngine: ObservableObject {
     @Published var syncLog: [SyncLogEntry] = []
     @Published var isPaused = false
     @Published var isConnected = false
+    @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     /// Sync interval in seconds (default 60)
     @Published var syncInterval: TimeInterval = 60 {
@@ -61,6 +63,19 @@ class SyncEngine: ObservableObject {
         timer?.invalidate()
         timer = nil
         isConnected = false
+    }
+
+    func toggleLaunchAtLogin() {
+        do {
+            if launchAtLogin {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+            launchAtLogin = SMAppService.mainApp.status == .enabled
+        } catch {
+            log("Launch at login failed: \(error.localizedDescription)")
+        }
     }
 
     func pause() {
