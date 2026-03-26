@@ -162,7 +162,8 @@ class SyncEngine: ObservableObject {
             log("→ Notion: Created '\(item.name)'")
 
         case .updateNotion(let pageId, let item):
-            let props = NotionPropertyBuilder.build(from: item)
+            let previousStatus = state.things[item.id]?.status
+            let props = NotionPropertyBuilder.build(from: item, previousStatus: previousStatus)
             try await notionClient.updatePage(pageId: pageId, properties: props)
             log("→ Notion: Updated '\(item.name)'")
 
