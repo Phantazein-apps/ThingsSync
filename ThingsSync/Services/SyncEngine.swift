@@ -43,7 +43,13 @@ class SyncEngine: ObservableObject {
         guard let apiKey = KeychainHelper.load(account: "notion-api-key"),
               let databaseId = KeychainHelper.load(account: "notion-database-id"),
               !apiKey.isEmpty, !databaseId.isEmpty else {
-            log("No saved credentials — open Settings to connect")
+            log("No saved credentials")
+            // Show onboarding on first launch
+            if KeychainHelper.load(account: "onboarding-complete") == nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    OnboardingWindowController.shared.show(syncEngine: self)
+                }
+            }
             return
         }
         start(apiKey: apiKey, databaseId: databaseId)

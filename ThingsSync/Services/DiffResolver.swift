@@ -36,13 +36,15 @@ enum DiffResolver {
                 // Exists in both — check for changes
                 let thingsChanged = hasThingsChanged(item: item, previousState: previousState)
                 let notionChanged = hasNotionChanged(thingsId: item.id, page: notionPage, previousState: previousState)
+                let statusMismatch = hasStatusMismatch(item: item, page: notionPage)
 
                 if thingsChanged && notionChanged {
                     // Conflict: Things wins
                     actions.append(.updateNotion(pageId: notionPage.id, item))
                 } else if thingsChanged {
                     actions.append(.updateNotion(pageId: notionPage.id, item))
-                } else if notionChanged {
+                } else if notionChanged || statusMismatch {
+                    // Notion changed or status is out of sync (e.g. from first-run snapshot)
                     actions.append(.updateThings(thingsId: item.id, notionPage))
                 }
             } else {
@@ -78,6 +80,15 @@ enum DiffResolver {
 
     private static func hasNotionChanged(thingsId: String, page: NotionPage, previousState: SyncState) -> Bool {
         guard let prev = previousState.notion[thingsId] else { return false }
-        return page.lastEdited != prev.lastEdited
+        return page.lastEdited != prev.lastEdited || page.status != prev.status
+    }
+
+    /// Detects items where Notion and Things status are out of sync,
+    /// even if neither has "changed" since the last snapshot.
+    /// This catches mismatches from first-run snapshots.
+    private static func hasStatusMismatch(item: ThingsItem, page: NotionPage) -> Bool {
+        let thingsDone = item.status == "Done"
+        let notionDone = page.status == "Done"
+        return thingsDone != notionDone
     }
 }

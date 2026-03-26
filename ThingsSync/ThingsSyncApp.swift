@@ -22,6 +22,10 @@ struct ThingsSyncApp: App {
             Image(systemName: menuBarIcon)
         }
         .menuBarExtraStyle(.window)
+        .onChange(of: syncEngine.isConnected) { _, _ in
+            // Show onboarding on first launch after the app scene is ready
+            showOnboardingIfNeeded()
+        }
     }
 
     private var menuBarIcon: String {
@@ -31,6 +35,14 @@ struct ThingsSyncApp: App {
             return "arrow.triangle.2.circlepath"
         } else {
             return "checkmark.circle"
+        }
+    }
+
+    private func showOnboardingIfNeeded() {
+        if KeychainHelper.load(account: "onboarding-complete") == nil && !syncEngine.isConnected {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                OnboardingWindowController.shared.show(syncEngine: syncEngine)
+            }
         }
     }
 }
