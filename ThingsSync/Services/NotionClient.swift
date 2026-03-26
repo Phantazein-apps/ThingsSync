@@ -9,6 +9,20 @@ actor NotionClient {
     private let databaseId: String
     private let session = URLSession.shared
 
+    enum NotionError: Error, LocalizedError {
+        case httpError(statusCode: Int, message: String)
+        case invalidResponse
+
+        var errorDescription: String? {
+            switch self {
+            case .httpError(let code, let message):
+                return "Notion API \(code): \(message)"
+            case .invalidResponse:
+                return "Invalid response from Notion API"
+            }
+        }
+    }
+
     init(apiKey: String, databaseId: String) {
         self.apiKey = apiKey
         self.databaseId = databaseId
@@ -76,14 +90,34 @@ actor NotionClient {
     private func post(path: String, body: [String: Any]) async throws -> Data {
         var request = makeRequest(path: path, method: "POST")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, _) = try await session.data(for: request)
-        return data
+        return try await execute(request)
     }
 
     private func patch(path: String, body: [String: Any]) async throws -> Data {
         var request = makeRequest(path: path, method: "PATCH")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, _) = try await session.data(for: request)
+        return try await execute(request)
+    }
+
+    private func execute(_ request: URLRequest) async throws -> Data {
+        let (data, response) = try await session.data(for: request)
+
+        guard let http = response as? HTTPURLResponse else {
+            throw NotionError.invalidResponse
+        }
+
+        guard (200...299).contains(http.statusCode) else {
+            // Try to extract Notion's error message
+            let message: String
+            if let errorBody = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let msg = errorBody["message"] as? String {
+                message = msg
+            } else {
+                message = String(data: data, encoding: .utf8) ?? "Unknown error"
+            }
+            throw NotionError.httpError(statusCode: http.statusCode, message: message)
+        }
+
         return data
     }
 
@@ -104,14 +138,13 @@ actor NotionClient {
         let title = props["Task"]?.title?.first?.text?.content ?? ""
         let thingsId = props["Things ID"]?.richText?.first?.text?.content ?? ""
         let status = props["Status"]?.select?.name ?? "Open"
-        let project = props["Project"]?.select?.name ?? "No project"
+        let project = props["Project"]?.select?.name ?? ""
         let notes = props["Notes"]?.richText?.first?.text?.content ?? ""
         let dueDate = props["Due Date"]?.date?.start
         let activationDate = props["Activation Date"]?.date?.start
 
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let lastEdited = formatter.date(from: raw.lastEditedTime) ?? Date()
+        // Parse ISO 8601 with multiple format attempts
+        let lastEdited = parseISO8601(raw.lastEditedTime) ?? Date()
 
         return NotionPage(
             id: raw.id,
@@ -125,5 +158,13 @@ actor NotionClient {
             lastEdited: lastEdited,
             archived: raw.archived
         )
+    }
+
+    private func parseISO8601(_ string: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: string) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: string)
     }
 }

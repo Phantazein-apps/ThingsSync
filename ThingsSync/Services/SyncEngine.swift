@@ -11,10 +11,11 @@ class SyncEngine: ObservableObject {
     @Published var lastError: String?
     @Published var syncLog: [SyncLogEntry] = []
     @Published var isPaused = false
+    @Published var isConnected = false
 
     /// Sync interval in seconds (default 60)
     @Published var syncInterval: TimeInterval = 60 {
-        didSet { restartTimer() }
+        didSet { if isConnected { restartTimer() } }
     }
 
     private var timer: Timer?
@@ -31,10 +32,27 @@ class SyncEngine: ObservableObject {
 
     // MARK: - Lifecycle
 
+    init() {
+        // Auto-connect on launch if credentials exist
+        autoConnect()
+    }
+
+    private func autoConnect() {
+        guard let apiKey = KeychainHelper.load(account: "notion-api-key"),
+              let databaseId = KeychainHelper.load(account: "notion-database-id"),
+              !apiKey.isEmpty, !databaseId.isEmpty else {
+            log("No saved credentials — open Settings to connect")
+            return
+        }
+        start(apiKey: apiKey, databaseId: databaseId)
+    }
+
     func start(apiKey: String, databaseId: String) {
         notionClient = NotionClient(apiKey: apiKey, databaseId: databaseId)
+        isConnected = true
         loadState()
         restartTimer()
+        log("Connected — syncing every \(Int(syncInterval))s")
         // Run immediately on start
         Task { await sync() }
     }
@@ -42,6 +60,7 @@ class SyncEngine: ObservableObject {
     func stop() {
         timer?.invalidate()
         timer = nil
+        isConnected = false
     }
 
     func pause() {
@@ -88,7 +107,9 @@ class SyncEngine: ObservableObject {
 
             lastSyncTime = Date()
 
-            if !actions.isEmpty {
+            if actions.isEmpty {
+                log("Sync complete — no changes")
+            } else {
                 log("Synced \(actions.count) change(s)")
             }
         } catch {
@@ -145,7 +166,9 @@ class SyncEngine: ObservableObject {
     }
 
     private func saveState() {
-        guard let data = try? JSONEncoder().encode(state) else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        guard let data = try? encoder.encode(state) else { return }
         try? data.write(to: stateURL)
     }
 

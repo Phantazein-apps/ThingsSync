@@ -1,13 +1,12 @@
 import Foundation
 import Security
 
-/// Simple Keychain wrapper for storing the Notion API key securely.
+/// Simple Keychain wrapper for storing credentials securely.
 enum KeychainHelper {
-    private static let service = "com.dk.ThingsSync"
-    private static let account = "notion-api-key"
+    private static let service = "com.phantazein.ThingsSync"
 
-    static func save(apiKey: String) throws {
-        let data = Data(apiKey.utf8)
+    static func save(account: String, value: String) throws {
+        let data = Data(value.utf8)
 
         // Delete existing item first
         let deleteQuery: [String: Any] = [
@@ -30,7 +29,7 @@ enum KeychainHelper {
         }
     }
 
-    static func load() -> String? {
+    static func load(account: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -48,7 +47,7 @@ enum KeychainHelper {
         return String(data: data, encoding: .utf8)
     }
 
-    static func delete() {
+    static func delete(account: String) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -59,6 +58,8 @@ enum KeychainHelper {
 
     enum KeychainError: Error, LocalizedError {
         case saveFailed(OSStatus)
-        var errorDescription: String? { "Keychain save failed with status \(self)" }
+        var errorDescription: String? {
+            "Keychain save failed with status \(self)"
+        }
     }
 }
