@@ -1,29 +1,23 @@
 import AppKit
 import Foundation
 
-/// Reads Things 3 "Today" items via the AppleScript/JXA bridge.
-/// Writes via the `things:///` URL scheme (requires auth token).
-/// Uses `lists.byId("TMTodayListSource")` which is locale-independent.
+/// Reads and writes Things 3 items via AppleScript/JXA.
+/// No auth token needed — AppleScript has full access.
 actor ThingsReader {
 
     enum ThingsError: Error, LocalizedError {
         case scriptFailed(String)
         case decodingFailed
-        case missingAuthToken
 
         var errorDescription: String? {
             switch self {
             case .scriptFailed(let msg): return "Things 3 script failed: \(msg)"
             case .decodingFailed: return "Failed to decode Things 3 response"
-            case .missingAuthToken: return "Things 3 URL auth token not set — go to Things → Settings → General"
             }
         }
     }
 
-    /// Auth token from Things 3 → Settings → General → "Enable Things URLs"
-    private var authToken: String? {
-        KeychainHelper.load(account: "things-auth-token")
-    }
+    // MARK: - Read
 
     /// Fetches all to-dos from the Things 3 Today list.
     func fetchTodayItems() throws -> [ThingsItem] {
@@ -54,10 +48,73 @@ actor ThingsReader {
           JSON.stringify(results);
         }
         """
+        return try runJXA(script)
+    }
 
+    // MARK: - Write
+
+    /// Creates a new Things 3 to-do in Today via AppleScript.
+    /// Returns the new todo's ID.
+    @discardableResult
+    func createItem(title: String, notes: String = "") throws -> String {
+        let escapedTitle = escapeAppleScript(title)
+        let escapedNotes = escapeAppleScript(notes)
+
+        let script = """
+        tell application "Things3"
+            set newTodo to make new to do with properties {name:"\(escapedTitle)", notes:"\(escapedNotes)"}
+            move newTodo to list "Today"
+            get id of newTodo
+        end tell
+        """
+        return try runAppleScript(script).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Updates an existing Things 3 to-do via AppleScript.
+    func updateItem(id: String, title: String? = nil, notes: String? = nil, completed: Bool = false) throws {
+        var commands: [String] = []
+        commands.append("set theTodo to to do id \"\(id)\"")
+
+        if let title {
+            commands.append("set name of theTodo to \"\(escapeAppleScript(title))\"")
+        }
+        if let notes {
+            commands.append("set notes of theTodo to \"\(escapeAppleScript(notes))\"")
+        }
+        if completed {
+            commands.append("set status of theTodo to completed")
+        }
+
+        let script = """
+        tell application "Things3"
+            \(commands.joined(separator: "\n            "))
+        end tell
+        """
+        _ = try runAppleScript(script)
+    }
+
+    // MARK: - Script execution
+
+    private func runJXA<T: Decodable>(_ script: String) throws -> T {
+        let output = try runProcess(args: ["-l", "JavaScript", "-e", script])
+
+        guard let jsonString = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                .nilIfEmpty,
+              let jsonData = jsonString.data(using: .utf8) else {
+            throw ThingsError.decodingFailed
+        }
+
+        return try JSONDecoder().decode(T.self, from: jsonData)
+    }
+
+    private func runAppleScript(_ script: String) throws -> String {
+        return try runProcess(args: ["-e", script])
+    }
+
+    private func runProcess(args: [String]) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-l", "JavaScript", "-e", script]
+        process.arguments = args
 
         let pipe = Pipe()
         let errPipe = Pipe()
@@ -75,53 +132,15 @@ actor ThingsReader {
             throw ThingsError.scriptFailed(errMsg)
         }
 
-        // osascript output includes a trailing newline; trim it
-        guard let jsonString = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              let jsonData = jsonString.data(using: .utf8) else {
-            throw ThingsError.decodingFailed
-        }
-
-        return try JSONDecoder().decode([ThingsItem].self, from: jsonData)
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
-    /// Updates a Things 3 to-do via the `things:///update` URL scheme.
-    func updateItem(id: String, title: String? = nil, notes: String? = nil, completed: Bool = false) throws {
-        guard let token = authToken, !token.isEmpty else {
-            throw ThingsError.missingAuthToken
-        }
-
-        var components = URLComponents(string: "things:///update")!
-        var queryItems = [
-            URLQueryItem(name: "auth-token", value: token),
-            URLQueryItem(name: "id", value: id),
-        ]
-        if let title { queryItems.append(URLQueryItem(name: "title", value: title)) }
-        if let notes { queryItems.append(URLQueryItem(name: "notes", value: notes)) }
-        if completed { queryItems.append(URLQueryItem(name: "completed", value: "true")) }
-        components.queryItems = queryItems
-
-        if let url = components.url {
-            NSWorkspace.shared.open(url)
-        }
+    private func escapeAppleScript(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+         .replacingOccurrences(of: "\"", with: "\\\"")
     }
+}
 
-    /// Creates a new Things 3 to-do in Today via the `things:///add` URL scheme.
-    func createItem(title: String, notes: String = "") throws {
-        guard let token = authToken, !token.isEmpty else {
-            throw ThingsError.missingAuthToken
-        }
-
-        var components = URLComponents(string: "things:///add")!
-        components.queryItems = [
-            URLQueryItem(name: "auth-token", value: token),
-            URLQueryItem(name: "title", value: title),
-            URLQueryItem(name: "notes", value: notes),
-            URLQueryItem(name: "when", value: "today"),
-            URLQueryItem(name: "reveal", value: "false"),
-        ]
-
-        if let url = components.url {
-            NSWorkspace.shared.open(url)
-        }
-    }
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
