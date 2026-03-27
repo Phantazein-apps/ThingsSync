@@ -126,9 +126,15 @@ class SyncEngine: ObservableObject {
                 )
             }
 
-            // Step 4: Execute actions
+            // Step 4: Execute actions (continue on individual failures)
             for action in actions {
-                try await execute(action: action, notionClient: notionClient)
+                do {
+                    try await execute(action: action, notionClient: notionClient)
+                } catch let error as ThingsReader.ThingsError where error.isTodoNotFound {
+                    log("⚠ Skipped — todo no longer in Things 3")
+                } catch {
+                    log("⚠ Action failed: \(error.localizedDescription)")
+                }
             }
 
             // Step 5: Save state

@@ -8,14 +8,21 @@ actor ThingsReader {
     enum ThingsError: Error, LocalizedError {
         case scriptFailed(String)
         case scriptTimedOut
+        case todoNotFound(String)
         case decodingFailed
 
         var errorDescription: String? {
             switch self {
             case .scriptFailed(let msg): return "Things 3 script failed: \(msg)"
             case .scriptTimedOut: return "Things 3 script timed out"
+            case .todoNotFound(let id): return "Things 3 to-do not found: \(id)"
             case .decodingFailed: return "Failed to decode Things 3 response"
             }
+        }
+
+        var isTodoNotFound: Bool {
+            if case .todoNotFound = self { return true }
+            return false
         }
     }
 
@@ -137,6 +144,7 @@ actor ThingsReader {
     }
 
     /// Updates an existing Things 3 to-do via AppleScript.
+    /// Throws `todoNotFound` if the to-do no longer exists in Things 3.
     func updateItem(id: String, title: String? = nil, notes: String? = nil, completed: Bool = false) throws {
         try throttleWrite()
         var commands: [String] = []
@@ -159,7 +167,11 @@ actor ThingsReader {
             end timeout
         end tell
         """
-        _ = try runAppleScript(script)
+        do {
+            _ = try runAppleScript(script)
+        } catch ThingsError.scriptFailed(let msg) where msg.contains("-1728") {
+            throw ThingsError.todoNotFound(id)
+        }
     }
 
     // MARK: - Throttling
