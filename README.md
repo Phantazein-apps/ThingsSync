@@ -8,7 +8,11 @@ Native macOS menu bar app for bidirectional **Things 3 ↔ Notion** sync.
 curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/ThingsSync/main/install.sh | bash
 ```
 
-Or download the latest `.zip` from [Releases](https://github.com/Phantazein-apps/ThingsSync/releases), extract, and double-click `Install.command`.
+To install a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Phantazein-apps/ThingsSync/main/install.sh | bash -s v0.2.0
+```
 
 ## What it does
 
