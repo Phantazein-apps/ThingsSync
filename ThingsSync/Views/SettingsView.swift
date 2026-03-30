@@ -5,6 +5,9 @@ struct SettingsView: View {
     @State private var apiKey = ""
     @State private var databaseId = ""
     @State private var saveError: String?
+    @State private var availableProjects: [ThingsProject] = []
+    @State private var availableAreas: [ThingsArea] = []
+    @State private var filterLoadError: String?
 
     var body: some View {
         Form {
@@ -45,11 +48,6 @@ struct SettingsView: View {
                     Text("5 minutes").tag(TimeInterval(300))
                 }
 
-                Toggle("Launch at login", isOn: Binding(
-                    get: { syncEngine.launchAtLogin },
-                    set: { _ in syncEngine.toggleLaunchAtLogin() }
-                ))
-
                 LabeledContent("Status") {
                     Text(statusText)
                         .foregroundStyle(statusColor)
@@ -66,6 +64,65 @@ struct SettingsView: View {
                         Text(error)
                             .foregroundStyle(.red)
                             .font(.caption)
+                    }
+                }
+            }
+
+            Section("Things 3 Filter") {
+                Picker("Sync", selection: $syncEngine.syncFilterMode) {
+                    Text("Everything").tag(SyncFilterMode.all)
+                    Text("By Project").tag(SyncFilterMode.byProject)
+                    Text("By Area").tag(SyncFilterMode.byArea)
+                }
+                .onChange(of: syncEngine.syncFilterMode) { _, _ in
+                    syncEngine.selectedFilterIDs = []
+                }
+
+                if let error = filterLoadError {
+                    Text(error)
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                }
+
+                if syncEngine.syncFilterMode == .byProject {
+                    if availableProjects.isEmpty {
+                        Text("No projects found")
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                    } else {
+                        ForEach(availableProjects) { project in
+                            Toggle(project.name, isOn: Binding(
+                                get: { syncEngine.selectedFilterIDs.contains(project.id) },
+                                set: { enabled in
+                                    if enabled {
+                                        syncEngine.selectedFilterIDs.insert(project.id)
+                                    } else {
+                                        syncEngine.selectedFilterIDs.remove(project.id)
+                                    }
+                                }
+                            ))
+                        }
+                    }
+                }
+
+                if syncEngine.syncFilterMode == .byArea {
+                    if availableAreas.isEmpty {
+                        Text("No areas found")
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                    } else {
+                        ForEach(availableAreas) { area in
+                            Toggle(area.name, isOn: Binding(
+                                get: { syncEngine.selectedFilterIDs.contains(area.id) },
+                                set: { enabled in
+                                    if enabled {
+                                        syncEngine.selectedFilterIDs.insert(area.id)
+                                    } else {
+                                        syncEngine.selectedFilterIDs.remove(area.id)
+                                    }
+                                }
+                            ))
+                        }
                     }
                 }
             }
@@ -90,10 +147,11 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 500, height: 560)
+        .frame(width: 500, height: 700)
         .onAppear {
             apiKey = KeychainHelper.load(account: "notion-api-key") ?? ""
             databaseId = KeychainHelper.load(account: "notion-database-id") ?? ""
+            loadThingsData()
         }
     }
 
@@ -108,6 +166,18 @@ struct SettingsView: View {
         if !syncEngine.isConnected { return .secondary }
         if syncEngine.isPaused { return .orange }
         return .green
+    }
+
+    private func loadThingsData() {
+        Task {
+            let reader = ThingsReader()
+            do {
+                availableProjects = try await reader.fetchProjects()
+                availableAreas = try await reader.fetchAreas()
+            } catch {
+                filterLoadError = error.localizedDescription
+            }
+        }
     }
 
     private func saveAndConnect() {

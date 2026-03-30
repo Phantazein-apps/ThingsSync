@@ -36,24 +36,102 @@ actor ThingsReader {
 
     // MARK: - Read
 
-    /// Fetches all to-dos from the Things 3 Today list.
-    /// Uses SQLite for speed and to avoid Apple event contention.
-    /// Falls back to JXA if the database file is inaccessible.
-    func fetchTodayItems() throws -> [ThingsItem] {
-        if let items = try? fetchTodayViaSQLite() {
-            return items
-        }
-        return try fetchTodayViaJXA()
-    }
-
-    /// Direct SQLite read — fast, no Apple events, no contention.
-    private func fetchTodayViaSQLite() throws -> [ThingsItem] {
-        let dbPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Group Containers/JLMPQHK86H.com.culturedcode.ThingsMac/ThingsData-RXWG2/Things Database.thingsdatabase/main.sqlite")
-            .path
+    /// Fetches all projects from the Things 3 database, ordered by most recently created tasks.
+    func fetchProjects() throws -> [ThingsProject] {
+        let dbPath = Self.databasePath
 
         guard FileManager.default.fileExists(atPath: dbPath) else {
             throw ThingsError.scriptFailed("Things 3 database not found")
+        }
+
+        let query = """
+        SELECT PROJ.uuid AS id, PROJ.title AS name
+        FROM TMTask AS PROJ
+        LEFT JOIN TMTask AS CHILD ON (CHILD.project = PROJ.uuid AND CHILD.trashed = 0 AND CHILD.type = 0)
+        WHERE PROJ.type = 1 AND PROJ.trashed = 0 AND PROJ.status = 0
+        GROUP BY PROJ.uuid
+        ORDER BY MAX(COALESCE(CHILD.creationDate, 0)) DESC
+        """
+
+        let output = try runProcess(
+            executable: "/usr/bin/sqlite3",
+            args: ["-json", "file:\(dbPath)?mode=ro", query],
+            timeout: 10
+        )
+
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else {
+            return []
+        }
+
+        return try JSONDecoder().decode([ThingsProject].self, from: data)
+    }
+
+    /// Fetches all areas from the Things 3 database, ordered by most recently created tasks.
+    func fetchAreas() throws -> [ThingsArea] {
+        let dbPath = Self.databasePath
+
+        guard FileManager.default.fileExists(atPath: dbPath) else {
+            throw ThingsError.scriptFailed("Things 3 database not found")
+        }
+
+        let query = """
+        SELECT AREA.uuid AS id, AREA.title AS name
+        FROM TMTask AS AREA
+        LEFT JOIN TMTask AS CHILD ON (CHILD.area = AREA.uuid AND CHILD.trashed = 0)
+        WHERE AREA.type = 2 AND AREA.trashed = 0
+        GROUP BY AREA.uuid
+        ORDER BY MAX(COALESCE(CHILD.creationDate, 0)) DESC
+        """
+
+        let output = try runProcess(
+            executable: "/usr/bin/sqlite3",
+            args: ["-json", "file:\(dbPath)?mode=ro", query],
+            timeout: 10
+        )
+
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else {
+            return []
+        }
+
+        return try JSONDecoder().decode([ThingsArea].self, from: data)
+    }
+
+    /// Fetches all to-dos from the Things 3 Today list.
+    /// Uses SQLite for speed and to avoid Apple event contention.
+    /// Falls back to JXA if the database file is inaccessible.
+    func fetchTodayItems(filterMode: SyncFilterMode = .all, selectedIDs: Set<String> = []) throws -> [ThingsItem] {
+        if let items = try? fetchTodayViaSQLite(filterMode: filterMode, selectedIDs: selectedIDs) {
+            return items
+        }
+        return try fetchTodayViaJXA(filterMode: filterMode, selectedIDs: selectedIDs)
+    }
+
+    private static let databasePath: String = {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Group Containers/JLMPQHK86H.com.culturedcode.ThingsMac/ThingsData-RXWG2/Things Database.thingsdatabase/main.sqlite")
+            .path
+    }()
+
+    /// Direct SQLite read — fast, no Apple events, no contention.
+    private func fetchTodayViaSQLite(filterMode: SyncFilterMode, selectedIDs: Set<String>) throws -> [ThingsItem] {
+        let dbPath = Self.databasePath
+
+        guard FileManager.default.fileExists(atPath: dbPath) else {
+            throw ThingsError.scriptFailed("Things 3 database not found")
+        }
+
+        let filterClause: String
+        switch filterMode {
+        case .all:
+            filterClause = ""
+        case .byProject:
+            let quoted = selectedIDs.map { "'\($0.replacingOccurrences(of: "'", with: "''"))'" }.joined(separator: ",")
+            filterClause = "AND TASK.project IN (\(quoted))"
+        case .byArea:
+            let quoted = selectedIDs.map { "'\($0.replacingOccurrences(of: "'", with: "''"))'" }.joined(separator: ",")
+            filterClause = "AND (TASK.area IN (\(quoted)) OR PROJECT.area IN (\(quoted)))"
         }
 
         let query = """
@@ -72,6 +150,7 @@ actor ThingsReader {
           AND TASK.type = 0
           AND TASK.start = 1
           AND TASK.startDate IS NOT NULL
+          \(filterClause)
         ORDER BY TASK.todayIndex
         """
 
@@ -90,15 +169,42 @@ actor ThingsReader {
     }
 
     /// JXA fallback — works without Full Disk Access but susceptible to timeouts.
-    private func fetchTodayViaJXA() throws -> [ThingsItem] {
+    private func fetchTodayViaJXA(filterMode: SyncFilterMode, selectedIDs: Set<String>) throws -> [ThingsItem] {
+        let filterSetupJS: String
+        let filterCheckJS: String
+        switch filterMode {
+        case .all:
+            filterSetupJS = ""
+            filterCheckJS = ""
+        case .byProject:
+            let jsArray = selectedIDs.map { "\"\($0)\"" }.joined(separator: ",")
+            filterSetupJS = "var filterIds = new Set([\(jsArray)]);"
+            filterCheckJS = """
+              var projId = null;
+              try { var p = t.project(); if (p) projId = p.id(); } catch(e) {}
+              if (!projId || !filterIds.has(projId)) continue;
+            """
+        case .byArea:
+            let jsArray = selectedIDs.map { "\"\($0)\"" }.joined(separator: ",")
+            filterSetupJS = "var filterIds = new Set([\(jsArray)]);"
+            filterCheckJS = """
+              var areaId = null;
+              try { var ar = t.area(); if (ar) areaId = ar.id(); } catch(e) {}
+              if (!areaId) { try { var p = t.project(); if (p) { var par = p.area(); if (par) areaId = par.id(); } } catch(e) {} }
+              if (!areaId || !filterIds.has(areaId)) continue;
+            """
+        }
+
         let script = """
         var things = Application("Things3");
         var todayList = things.lists.byId("TMTodayListSource");
         var todos = todayList.toDos();
+        \(filterSetupJS)
         if (!todos || todos.length === 0) { JSON.stringify([]); } else {
           var results = [];
           for (var i = 0; i < todos.length; i++) {
             var t = todos[i];
+            \(filterCheckJS)
             var projName = null;
             try { var p = t.project(); if (p) projName = p.name(); } catch(e) {}
             var dd = null;

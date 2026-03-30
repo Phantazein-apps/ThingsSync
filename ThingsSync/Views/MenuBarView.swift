@@ -76,6 +76,14 @@ struct MenuBarView: View {
                 Divider()
             }
 
+            Toggle("Launch at login", isOn: Binding(
+                get: { syncEngine.launchAtLogin },
+                set: { _ in syncEngine.toggleLaunchAtLogin() }
+            ))
+            .font(.caption)
+
+            Divider()
+
             // Footer
             Button {
                 let engine = syncEngine
@@ -111,7 +119,7 @@ final class SettingsWindowController {
 
         let settingsView = SettingsView(syncEngine: syncEngine)
         let hostingView = NSHostingView(rootView: settingsView)
-        hostingView.frame = NSRect(x: 0, y: 0, width: 500, height: 560)
+        hostingView.frame = NSRect(x: 0, y: 0, width: 500, height: 700)
 
         let window = NSWindow(
             contentRect: hostingView.frame,

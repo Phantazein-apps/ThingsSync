@@ -20,6 +20,16 @@ class SyncEngine: ObservableObject {
         didSet { if isConnected { restartTimer() } }
     }
 
+    /// How to filter Things 3 items: all, by project, or by area.
+    @Published var syncFilterMode: SyncFilterMode = .all {
+        didSet { saveFilterConfig() }
+    }
+
+    /// Selected Things 3 project or area IDs to sync (depends on syncFilterMode).
+    @Published var selectedFilterIDs: Set<String> = [] {
+        didSet { saveFilterConfig() }
+    }
+
     private var timer: Timer?
     private var thingsReader = ThingsReader()
     private var notionClient: NotionClient?
@@ -59,6 +69,7 @@ class SyncEngine: ObservableObject {
         notionClient = NotionClient(apiKey: apiKey, databaseId: databaseId)
         isConnected = true
         loadState()
+        loadFilterConfig()
         restartTimer()
         log("Connected — syncing every \(Int(syncInterval))s")
         // Run immediately on start
@@ -104,8 +115,8 @@ class SyncEngine: ObservableObject {
         lastError = nil
 
         do {
-            // Step 1: Read Things 3
-            let thingsItems = try await thingsReader.fetchTodayItems()
+            // Step 1: Read Things 3 (filtered by selected projects/areas)
+            let thingsItems = try await thingsReader.fetchTodayItems(filterMode: syncFilterMode, selectedIDs: selectedFilterIDs)
 
             // Step 2: Read Notion
             let notionPages = try await notionClient.queryDatabase()
@@ -230,6 +241,32 @@ class SyncEngine: ObservableObject {
         }
 
         return SyncState(lastSync: Date(), things: thingsSnap, notion: notionSnap, notionPages: pages)
+    }
+
+    // MARK: - Filter config
+
+    private struct FilterConfig: Codable {
+        let mode: SyncFilterMode
+        let ids: [String]
+    }
+
+    private func loadFilterConfig() {
+        guard let json = KeychainHelper.load(account: "sync-filter"),
+              let data = json.data(using: .utf8),
+              let config = try? JSONDecoder().decode(FilterConfig.self, from: data) else {
+            syncFilterMode = .all
+            selectedFilterIDs = []
+            return
+        }
+        syncFilterMode = config.mode
+        selectedFilterIDs = Set(config.ids)
+    }
+
+    private func saveFilterConfig() {
+        let config = FilterConfig(mode: syncFilterMode, ids: Array(selectedFilterIDs))
+        guard let data = try? JSONEncoder().encode(config),
+              let json = String(data: data, encoding: .utf8) else { return }
+        try? KeychainHelper.save(account: "sync-filter", value: json)
     }
 
     // MARK: - Timer
