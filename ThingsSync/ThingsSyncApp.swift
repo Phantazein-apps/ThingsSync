@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 @main
 struct ThingsSyncApp: App {
@@ -13,6 +14,18 @@ struct ThingsSyncApp: App {
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 30))
             exit(0)
         }
+
+        // Single-instance guard: quit if another ThingsSync is already running
+        if let bundleId = Bundle.main.bundleIdentifier {
+            let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+            if running.count > 1 {
+                exit(0)
+            }
+        }
+
+        // Disable state restoration to prevent macOS from relaunching the app
+        // alongside SMAppService (launch-at-login), which causes duplicates
+        UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
     }
 
     var body: some Scene {
