@@ -37,8 +37,9 @@ pkill -f "$APP" 2>/dev/null && sleep 1 || true
 [ -d "$DEST" ] && rm -rf "$DEST"
 cp -R "$APP" "$DEST"
 
-# Remove quarantine flag
+# Remove quarantine flag and ad-hoc sign so macOS remembers permissions
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
+codesign --force --deep --sign - "$DEST" 2>/dev/null || true
 
 # Cleanup
 rm -rf "$TMP"

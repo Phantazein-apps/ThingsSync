@@ -1,6 +1,9 @@
 import SwiftUI
 import AppKit
 
+/// File descriptor for the single-instance lock — held for the process lifetime.
+private var lockFD: Int32 = -1
+
 @main
 struct ThingsSyncApp: App {
     @StateObject private var syncEngine = SyncEngine()
@@ -15,12 +18,15 @@ struct ThingsSyncApp: App {
             exit(0)
         }
 
-        // Single-instance guard: quit if another ThingsSync is already running
-        if let bundleId = Bundle.main.bundleIdentifier {
-            let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
-            if running.count > 1 {
-                exit(0)
-            }
+        // Single-instance guard using POSIX file lock.
+        // Unlike NSRunningApplication, this has no race condition — the kernel
+        // guarantees only one process can hold an exclusive lock.
+        let lockPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".things3-notion-sync/thingssync.lock").path
+        lockFD = open(lockPath, O_WRONLY | O_CREAT, 0o600)
+        if lockFD == -1 || flock(lockFD, LOCK_EX | LOCK_NB) != 0 {
+            // Another instance holds the lock — exit immediately
+            exit(0)
         }
 
         // Disable state restoration to prevent macOS from relaunching the app
