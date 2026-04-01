@@ -65,7 +65,7 @@ enum CLITest {
                     print("    ← Update in Things: '\(page.title)'")
                 case .createInThings(let page):
                     print("    ← Create in Things: '\(page.title)'")
-                case .archiveNotion(_, let title):
+                case .archiveNotion(_, let title, _):
                     print("    → Archive in Notion: '\(title)'")
                 }
             }

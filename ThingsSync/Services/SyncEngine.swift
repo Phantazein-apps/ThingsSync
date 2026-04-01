@@ -202,9 +202,15 @@ class SyncEngine: ObservableObject {
             try await thingsReader.createItem(title: page.title, notes: page.notes)
             log("← Things: Created '\(page.title)'")
 
-        case .archiveNotion(let pageId, let title):
-            try await notionClient.archivePage(pageId: pageId)
-            log("→ Notion: Archived '\(title)'")
+        case .archiveNotion(let pageId, let title, let thingsId):
+            // Only archive if the task is truly gone from Things 3 (deleted/trashed/completed).
+            // If it just moved out of Today (e.g. rescheduled to tomorrow), leave the Notion page alone.
+            if await thingsReader.taskExists(id: thingsId) {
+                log("⏭ Notion: Skipped archive '\(title)' — task still exists in Things 3")
+            } else {
+                try await notionClient.archivePage(pageId: pageId)
+                log("→ Notion: Archived '\(title)'")
+            }
         }
     }
 

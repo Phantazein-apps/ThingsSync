@@ -98,6 +98,20 @@ actor ThingsReader {
         return try JSONDecoder().decode([ThingsArea].self, from: data)
     }
 
+    /// Checks whether a task still exists in Things 3 (any list, not trashed).
+    func taskExists(id: String) -> Bool {
+        let dbPath = Self.databasePath
+        guard FileManager.default.fileExists(atPath: dbPath) else { return true } // assume exists if DB unavailable
+        let query = "SELECT COUNT(*) FROM TMTask WHERE uuid = '\(id.replacingOccurrences(of: "'", with: "''"))' AND trashed = 0 AND status != 3;"
+        guard let output = try? runProcess(executable: "/usr/bin/sqlite3", args: ["-json", "file:\(dbPath)?mode=ro", query], timeout: 5),
+              let data = output.trimmingCharacters(in: .whitespacesAndNewlines).data(using: .utf8),
+              let rows = try? JSONDecoder().decode([[String: Int]].self, from: data),
+              let count = rows.first?.values.first else {
+            return true // assume exists on error
+        }
+        return count > 0
+    }
+
     /// Fetches all to-dos from the Things 3 Today list.
     /// Uses SQLite for speed and to avoid Apple event contention.
     /// Falls back to JXA if the database file is inaccessible.

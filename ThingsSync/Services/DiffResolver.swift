@@ -6,7 +6,7 @@ enum SyncAction {
     case updateNotion(pageId: String, ThingsItem)
     case updateThings(thingsId: String, NotionPage)
     case createInThings(NotionPage)
-    case archiveNotion(pageId: String, title: String)
+    case archiveNotion(pageId: String, title: String, thingsId: String)
 }
 
 /// Compares Things 3 and Notion states against the previous snapshot
@@ -57,7 +57,7 @@ enum DiffResolver {
         for page in notionPages where !page.thingsId.isEmpty {
             if thingsById[page.thingsId] == nil,
                previousState.things[page.thingsId] != nil {
-                actions.append(.archiveNotion(pageId: page.id, title: page.title))
+                actions.append(.archiveNotion(pageId: page.id, title: page.title, thingsId: page.thingsId))
             }
         }
 
