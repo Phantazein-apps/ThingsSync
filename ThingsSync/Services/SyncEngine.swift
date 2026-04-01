@@ -30,6 +30,11 @@ class SyncEngine: ObservableObject {
         didSet { saveFilterConfig() }
     }
 
+    /// When true, recurring task instances are excluded from sync.
+    @Published var excludeRecurring: Bool = true {
+        didSet { saveFilterConfig() }
+    }
+
     private var timer: Timer?
     private var thingsReader = ThingsReader()
     private var notionClient: NotionClient?
@@ -116,7 +121,7 @@ class SyncEngine: ObservableObject {
 
         do {
             // Step 1: Read Things 3 (filtered by selected projects/areas)
-            let thingsItems = try await thingsReader.fetchTodayItems(filterMode: syncFilterMode, selectedIDs: selectedFilterIDs)
+            let thingsItems = try await thingsReader.fetchTodayItems(filterMode: syncFilterMode, selectedIDs: selectedFilterIDs, excludeRecurring: excludeRecurring)
 
             // Step 2: Read Notion
             let notionPages = try await notionClient.queryDatabase()
@@ -248,6 +253,7 @@ class SyncEngine: ObservableObject {
     private struct FilterConfig: Codable {
         let mode: SyncFilterMode
         let ids: [String]
+        var excludeRecurring: Bool?
     }
 
     private func loadFilterConfig() {
@@ -260,10 +266,11 @@ class SyncEngine: ObservableObject {
         }
         syncFilterMode = config.mode
         selectedFilterIDs = Set(config.ids)
+        excludeRecurring = config.excludeRecurring ?? true
     }
 
     private func saveFilterConfig() {
-        let config = FilterConfig(mode: syncFilterMode, ids: Array(selectedFilterIDs))
+        let config = FilterConfig(mode: syncFilterMode, ids: Array(selectedFilterIDs), excludeRecurring: excludeRecurring)
         guard let data = try? JSONEncoder().encode(config),
               let json = String(data: data, encoding: .utf8) else { return }
         try? KeychainHelper.save(account: "sync-filter", value: json)

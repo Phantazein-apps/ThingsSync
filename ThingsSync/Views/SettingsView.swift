@@ -69,6 +69,8 @@ struct SettingsView: View {
             }
 
             Section("Things 3 Filter") {
+                Toggle("Exclude recurring tasks", isOn: $syncEngine.excludeRecurring)
+
                 Picker("Sync", selection: $syncEngine.syncFilterMode) {
                     Text("Everything").tag(SyncFilterMode.all)
                     Text("By Project").tag(SyncFilterMode.byProject)

@@ -101,11 +101,11 @@ actor ThingsReader {
     /// Fetches all to-dos from the Things 3 Today list.
     /// Uses SQLite for speed and to avoid Apple event contention.
     /// Falls back to JXA if the database file is inaccessible.
-    func fetchTodayItems(filterMode: SyncFilterMode = .all, selectedIDs: Set<String> = []) throws -> [ThingsItem] {
-        if let items = try? fetchTodayViaSQLite(filterMode: filterMode, selectedIDs: selectedIDs) {
+    func fetchTodayItems(filterMode: SyncFilterMode = .all, selectedIDs: Set<String> = [], excludeRecurring: Bool = true) throws -> [ThingsItem] {
+        if let items = try? fetchTodayViaSQLite(filterMode: filterMode, selectedIDs: selectedIDs, excludeRecurring: excludeRecurring) {
             return items
         }
-        return try fetchTodayViaJXA(filterMode: filterMode, selectedIDs: selectedIDs)
+        return try fetchTodayViaJXA(filterMode: filterMode, selectedIDs: selectedIDs, excludeRecurring: excludeRecurring)
     }
 
     private static let databasePath: String = {
@@ -115,7 +115,7 @@ actor ThingsReader {
     }()
 
     /// Direct SQLite read — fast, no Apple events, no contention.
-    private func fetchTodayViaSQLite(filterMode: SyncFilterMode, selectedIDs: Set<String>) throws -> [ThingsItem] {
+    private func fetchTodayViaSQLite(filterMode: SyncFilterMode, selectedIDs: Set<String>, excludeRecurring: Bool) throws -> [ThingsItem] {
         let dbPath = Self.databasePath
 
         guard FileManager.default.fileExists(atPath: dbPath) else {
@@ -150,6 +150,7 @@ actor ThingsReader {
           AND TASK.type = 0
           AND TASK.start = 1
           AND TASK.startDate IS NOT NULL
+          \(excludeRecurring ? "AND TASK.rt1_repeatingTemplate IS NULL" : "")
           \(filterClause)
         ORDER BY TASK.todayIndex
         """
@@ -169,7 +170,9 @@ actor ThingsReader {
     }
 
     /// JXA fallback — works without Full Disk Access but susceptible to timeouts.
-    private func fetchTodayViaJXA(filterMode: SyncFilterMode, selectedIDs: Set<String>) throws -> [ThingsItem] {
+    /// Note: excludeRecurring is not supported in JXA — Things 3 AppleScript API
+    /// does not expose recurrence info. SQLite (primary path) handles it.
+    private func fetchTodayViaJXA(filterMode: SyncFilterMode, selectedIDs: Set<String>, excludeRecurring: Bool = true) throws -> [ThingsItem] {
         let filterSetupJS: String
         let filterCheckJS: String
         switch filterMode {
